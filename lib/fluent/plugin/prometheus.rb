@@ -93,6 +93,17 @@ module Fluent
         end
       end
 
+      def self.start_reset_threads(metrics, registry, thread_create, thread_running, log)
+        metrics.select { |metric| metric.has_reset? }.each do |metric|
+          thread_create.call("prometheus_reset_#{metric.name}".to_sym) do
+            while thread_running.call()
+              sleep(metric.reset_after)
+              metric.reset_values(registry, log)
+            end
+          end
+        end
+      end
+
       def self.placeholder_expander(log)
         Fluent::Plugin::Prometheus::ExpandBuilder.new(log: log)
       end
@@ -170,6 +181,7 @@ module Fluent
         attr_reader :desc
         attr_reader :retention
         attr_reader :retention_check_interval
+        attr_reader :reset_after
 
         def initialize(element, registry, labels)
           ['name', 'desc'].each do |key|
@@ -186,6 +198,8 @@ module Fluent
           if has_retention?
             @last_modified_store = LastModifiedStore.new
           end
+          @topk = element['topk'].to_i
+          @reset_after = element['reset_after'].to_i
 
           @base_labels = Fluent::Plugin::Prometheus.parse_labels_elements(element)
           @base_labels = labels.merge(@base_labels)
@@ -239,6 +253,10 @@ module Fluent
           @retention > 0
         end
 
+        def has_reset?
+          reset_after > 0
+        end
+
         def remove_expired_metrics(registry, log)
           if has_retention?
             metric = registry.get(@name)
@@ -253,6 +271,16 @@ module Fluent
             }
           else
             log.warn('remove_expired_metrics should not be called when retention is not set for this metric!')
+          end
+        end
+
+        def reset_values(registry, log)
+          if has_reset?
+            metric = registry.get(@name)
+            log.debug "Resetting values nof metric #{@name}..."
+            metric.reset_values
+          else
+            log.warn('reset_store should not be called when reset_after is not set for this metric!')
           end
         end
 
@@ -294,7 +322,12 @@ module Fluent
           end
 
           begin
-            @gauge = registry.gauge(element['name'].to_sym, docstring: element['desc'], labels: @base_labels.keys)
+            @gauge = registry.gauge(
+              element['name'].to_sym,
+              docstring: element['desc'],
+              labels: @base_labels.keys,
+              store_settings: { topk: @topk }
+            )
           rescue ::Prometheus::Client::Registry::AlreadyRegisteredError
             @gauge = Fluent::Plugin::Prometheus::Metric.get(registry, element['name'].to_sym, :gauge, element['desc'])
           end
@@ -317,7 +350,12 @@ module Fluent
         def initialize(element, registry, labels)
           super
           begin
-            @counter = registry.counter(element['name'].to_sym, docstring: element['desc'], labels: @base_labels.keys)
+            @counter = registry.counter(
+              element['name'].to_sym,
+              docstring: element['desc'],
+              labels: @base_labels.keys,
+              store_settings: { topk: @topk }
+            )
           rescue ::Prometheus::Client::Registry::AlreadyRegisteredError
             @counter = Fluent::Plugin::Prometheus::Metric.get(registry, element['name'].to_sym, :counter, element['desc'])
           end

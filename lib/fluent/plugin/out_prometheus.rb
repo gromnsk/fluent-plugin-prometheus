@@ -33,6 +33,13 @@ module Fluent::Plugin
         method(:thread_current_running?),
         @log
       )
+      Fluent::Plugin::Prometheus.start_reset_threads(
+        @metrics,
+        @registry,
+        method(:thread_create),
+        method(:thread_current_running?),
+        @log
+      )
     end
 
     def process(tag, es)

@@ -100,4 +100,67 @@ describe Fluent::Plugin::PrometheusOutput do
       end
     end
   end
+
+  describe '#run with topk' do
+    let(:message1) { { "foo" => 200, "bar" => "a" } }
+    let(:message2) { { "foo" => 300, "bar" => "b" } }
+    let(:message3) { { "foo" => 100, "bar" => "c" } }
+
+    context 'config with topk 2' do
+      let(:config) {
+        BASE_CONFIG + %(
+          <metric>
+            name simple
+            type counter
+            desc Something foo.
+            key foo
+            <labels>
+              bar ${bar}
+            </labels>
+            topk 2
+          </metric>
+        )
+      }
+
+      it 'shows only top 2 metrics' do
+        expect(registry.metrics.map(&:name)).not_to eq([:simple])
+        driver.run(default_tag: tag) {
+          driver.feed(event_time, message1)
+          driver.feed(event_time, message2)
+          driver.feed(event_time, message3)
+        }
+        expect(registry.metrics[0].values).to eq({
+                                                   { :bar => "a" } => 200,
+                                                   { :bar => "b" } => 300,
+                                                 })
+      end
+    end
+  end
+
+  describe '#run with reset_after' do
+    let(:message) { { "foo" => 100 } }
+
+    context 'config with reset_after 1' do
+      let(:config) {
+        BASE_CONFIG + %(
+          <metric>
+            name simple
+            type counter
+            desc Something foo.
+            key foo
+            reset_after 1
+          </metric>
+        )
+      }
+
+      it 'resets metric values after max 2s' do
+        expect(registry.metrics.map(&:name)).not_to eq([:simple])
+        driver.run(default_tag: tag) {
+          driver.feed(event_time, message)
+          sleep(2)
+        }
+        expect(registry.metrics[0].values).to eq({ {} => 0 })
+      end
+    end
+  end
 end
