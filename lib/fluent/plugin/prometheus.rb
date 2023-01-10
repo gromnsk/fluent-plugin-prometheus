@@ -181,8 +181,8 @@ module Fluent
           @name = element['name']
           @key = element['key']
           @desc = element['desc']
-          @retention = element['retention'].to_i
-          @retention_check_interval = element.fetch('retention_check_interval', 60).to_i
+          @retention = element.fetch('retention', 300).to_i
+          @retention_check_interval = element.fetch('retention_check_interval', 150).to_i
           if has_retention?
             @last_modified_store = LastModifiedStore.new
           end
